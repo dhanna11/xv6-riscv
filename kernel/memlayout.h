@@ -62,6 +62,8 @@
 //   fixed-size stack
 //   expandable heap
 //   ...
+//   KERNEL STACK
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
+#define USER_KSTACK (TRAPFRAME - PGSIZE)

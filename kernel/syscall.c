@@ -34,19 +34,20 @@ static uint64
 argraw(int n)
 {
   struct proc *p = myproc();
+  struct trapframe *trapframe= gettrapframe(p);
   switch (n) {
   case 0:
-    return p->trapframe->a0;
+    return trapframe->a0;
   case 1:
-    return p->trapframe->a1;
+    return trapframe->a1;
   case 2:
-    return p->trapframe->a2;
+    return trapframe->a2;
   case 3:
-    return p->trapframe->a3;
+    return trapframe->a3;
   case 4:
-    return p->trapframe->a4;
+    return trapframe->a4;
   case 5:
-    return p->trapframe->a5;
+    return trapframe->a5;
   }
   panic("argraw");
   return -1;
@@ -133,15 +134,15 @@ syscall(void)
 {
   int num;
   struct proc *p = myproc();
-
-  num = p->trapframe->a7;
+  struct trapframe *trapframe = gettrapframe(p);
+  num = trapframe->a7;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0
-    p->trapframe->a0 = syscalls[num]();
+    trapframe->a0 = syscalls[num]();
   } else {
     printf("%d %s: unknown sys call %d\n",
             p->pid, p->name, num);
-    p->trapframe->a0 = -1;
+    trapframe->a0 = -1;
   }
 }
