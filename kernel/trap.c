@@ -46,7 +46,7 @@ usertrap(void)
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
-  struct trapframe *trapframe = gettrapframe(p);
+  struct trapframe *trapframe = gettrapframe(p->thread);
    
   // save user program counter.
   trapframe->epc = r_sepc();
@@ -102,11 +102,11 @@ usertrapret(void)
   w_stvec(trampoline_uservec);
   w_sscratch(USER_KSTACK + PGSIZE - sizeof(struct trapframe));   
   
-  struct trapframe *trapframe = gettrapframe(p);
+  struct trapframe *trapframe = gettrapframe(p->thread);
   // set up trapframe values that uservec will need when
   // the process next traps into the kernel.
   trapframe->kernel_satp = r_satp();         // kernel page table
-  trapframe->kernel_sp = p->kstack + PGSIZE - sizeof(struct trapframe); // process's kernel stack
+  trapframe->kernel_sp = p->thread->kstack + PGSIZE - sizeof(struct trapframe); // process's kernel stack
   
   trapframe->kernel_trap = (uint64)usertrap;
   trapframe->kernel_hartid = r_tp();         // hartid for cpuid()

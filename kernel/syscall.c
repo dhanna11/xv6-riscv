@@ -34,7 +34,7 @@ static uint64
 argraw(int n)
 {
   struct proc *p = myproc();
-  struct trapframe *trapframe= gettrapframe(p);
+  struct trapframe *trapframe= gettrapframe(p->thread);
   switch (n) {
   case 0:
     return trapframe->a0;
@@ -134,7 +134,7 @@ syscall(void)
 {
   int num;
   struct proc *p = myproc();
-  struct trapframe *trapframe = gettrapframe(p);
+  struct trapframe *trapframe = gettrapframe(p->thread);
   num = trapframe->a7;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     // Use num to lookup the system call function for num, call it,

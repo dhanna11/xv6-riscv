@@ -9,7 +9,7 @@
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
-
+struct thread thread[NTHREAD];
 struct proc *initproc;
 
 extern pagetable_t kernel_pagetable;
@@ -49,13 +49,15 @@ void
 procinit(void)
 {
   struct proc *p;
-  
+  struct thread *t; 
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
-  for(p = proc; p < &proc[NPROC]; p++) {
+  for(p = proc, t = thread; p < &proc[NPROC]; p++, t++) {
+
       initlock(&p->lock, "proc");
       p->state = UNUSED;
-      p->kstack = KSTACK((int) (p - proc));
+	  p->thread = t;
+      p->thread->kstack = KSTACK((int) (p - proc));
   }
 }
 
@@ -136,9 +138,9 @@ found:
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
-  memset(&p->context, 0, sizeof(p->context));
-  p->context.ra = (uint64)forkret;
-  p->context.sp = p->kstack + PGSIZE - sizeof(struct trapframe);
+  memset(&p->thread->context, 0, sizeof(p->thread->context));
+  p->thread->context.ra = (uint64)forkret;
+  p->thread->context.sp = p->thread->kstack + PGSIZE - sizeof(struct trapframe);
 
   return p;
 }
@@ -156,7 +158,7 @@ freeproc(struct proc *p)
   p->pid = 0;
   p->parent = 0;
   p->name[0] = 0;
-  p->chan = 0;
+  p->thread->chan = 0;
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
@@ -187,7 +189,7 @@ proc_pagetable(struct proc *p)
   // map the trapframe page just below the trampoline page, for
   // trampoline.S.
 
-  pte_t* kstack_pte = walk(kernel_pagetable, p->kstack, 0);
+  pte_t* kstack_pte = walk(kernel_pagetable, p->thread->kstack, 0);
   uint64 kstack_pa = PTE2PA(*kstack_pte);  
   if(mappages(pagetable, USER_KSTACK, PGSIZE,
               kstack_pa, PTE_R | PTE_W) < 0) {
@@ -237,7 +239,7 @@ userinit(void)
   p->sz = PGSIZE;
 
   // prepare for the very first "return" from kernel to user.
-  struct trapframe *trapframe = gettrapframe(p);
+  struct trapframe *trapframe = gettrapframe(p->thread);
   trapframe->epc = 0;      // user program counter
   trapframe->sp = PGSIZE;  // user stack pointer
 
@@ -292,8 +294,8 @@ fork(void)
   np->sz = p->sz;
 
   // copy saved user registers.
-  struct trapframe * trapframe = gettrapframe(p);
-  struct trapframe * np_trapframe = gettrapframe(np); 
+  struct trapframe * trapframe = gettrapframe(p->thread);
+  struct trapframe * np_trapframe = gettrapframe(np->thread); 
   *(np_trapframe) = *(trapframe);
 
   // Cause fork to return 0 in the child.
@@ -321,7 +323,62 @@ fork(void)
 
   return pid;
 }
+/*
+// Create a new thread, copying the parent.
+// Sets up child kernel stack to return as if from fork() system call.
+int
+tspawn(void)
+{
+  int i, pid;
+  struct proc *np;
+  struct proc *p = myproc();
 
+  // Allocate process.
+  if((np = allocproc()) == 0){
+    return -1;
+  }
+  // Share pagetable between processes. 
+  p->pagetable = np->pagetable;
+
+  // Copy user memory from parent to child.
+  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+  np->sz = p->sz;
+
+  // copy saved user registers.
+  struct trapframe * trapframe = gettrapframe(p);
+  struct trapframe * np_trapframe = gettrapframe(np); 
+  *(np_trapframe) = *(trapframe);
+
+  // Cause clone to return 0 in the child.
+  np_trapframe->a0 = 0;
+
+  // increment reference counts on open file descriptors.
+  for(i = 0; i < NOFILE; i++)
+    if(p->ofile[i])
+      np->ofile[i] = filedup(p->ofile[i]);
+  np->cwd = idup(p->cwd);
+
+  safestrcpy(np->name, p->name, sizeof(p->name));
+
+  pid = np->pid;
+
+  release(&np->lock);
+
+  acquire(&wait_lock);
+  np->parent = p;
+  release(&wait_lock);
+
+  acquire(&np->lock);
+  np->state = RUNNABLE;
+  release(&np->lock);
+
+  return pid;
+}
+*/
 // Pass p's abandoned children to init.
 // Caller must hold wait_lock.
 void
@@ -452,13 +509,13 @@ scheduler(void)
 
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
+      if(p->thread->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
-        p->state = RUNNING;
+        p->thread->state = RUNNING;
         c->proc = p;
-        swtch(&c->context, &p->context);
+        swtch(&c->context, &p->thread->context);
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
@@ -486,13 +543,13 @@ sched(void)
     panic("sched p->lock");
   if(mycpu()->noff != 1)
     panic("sched locks");
-  if(p->state == RUNNING)
+  if(p->thread->state == RUNNING)
     panic("sched running");
   if(intr_get())
     panic("sched interruptible");
 
   intena = mycpu()->intena;
-  swtch(&p->context, &mycpu()->context);
+  swtch(&p->thread->context, &mycpu()->context);
   mycpu()->intena = intena;
 }
 
@@ -502,7 +559,7 @@ yield(void)
 {
   struct proc *p = myproc();
   acquire(&p->lock);
-  p->state = RUNNABLE;
+  p->thread->state = RUNNABLE;
   sched();
   release(&p->lock);
 }
@@ -546,13 +603,13 @@ sleep(void *chan, struct spinlock *lk)
   release(lk);
 
   // Go to sleep.
-  p->chan = chan;
-  p->state = SLEEPING;
+  p->thread->chan = chan;
+  p->thread->state = SLEEPING;
 
   sched();
 
   // Tidy up.
-  p->chan = 0;
+  p->thread->chan = 0;
 
   // Reacquire original lock.
   release(&p->lock);
@@ -569,8 +626,8 @@ wakeup(void *chan)
   for(p = proc; p < &proc[NPROC]; p++) {
     if(p != myproc()){
       acquire(&p->lock);
-      if(p->state == SLEEPING && p->chan == chan) {
-        p->state = RUNNABLE;
+      if(p->thread->state == SLEEPING && p->thread->chan == chan) {
+        p->thread->state = RUNNABLE;
       }
       release(&p->lock);
     }
@@ -589,9 +646,9 @@ kill(int pid)
     acquire(&p->lock);
     if(p->pid == pid){
       p->killed = 1;
-      if(p->state == SLEEPING){
+      if(p->thread->state == SLEEPING){
         // Wake process from sleep().
-        p->state = RUNNABLE;
+        p->thread->state = RUNNABLE;
       }
       release(&p->lock);
       return 0;
@@ -680,6 +737,6 @@ procdump(void)
   }
 }
 
-struct trapframe *gettrapframe(struct proc* p) {
-    return (struct trapframe*)(p->kstack + PGSIZE - sizeof(struct trapframe));
+struct trapframe *gettrapframe(struct thread* t) {
+    return (struct trapframe*)(t->kstack + PGSIZE - sizeof(struct trapframe));
 }

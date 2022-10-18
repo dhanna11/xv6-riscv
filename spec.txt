@@ -1,0 +1,31 @@
+Goal: To add kernel threads to xv6-riscv and to implement a small pthreads inspired library on top of it.
+The design will be based on CMU's 15-410 Pebbles Kernel specification and https://www.ietfng.org/nwf/cs/osassign-uthreads.html
+
+User-Space Thread Creation API: 
+int uthr_init(unsigned int stack_size);
+void *uthr_malloc(int size);
+void uthr_free();
+int uthr_create(void (*f)(void *), void *arg);
+
+int uthr_exit(void *baton);
+int uthr_join(int tid, void **hand);
+
+Kernel Thread Creation API:
+int tspawn(void *stktop, void (*f)(void *), void *a);
+void texit(int *where, int what)
+
+Design:
+
+The kernel threads will be implementing using a 1:M process:thread mapping.
+Process and Thread ID's share namespace. 
+
+
+Plan:
+1. Move trapframe onto kernel stack, to allow threads to independently trap into userspace. 
+2. Refactor struct proc to hold one instance of struct thread.
+3. Change struct proc to be able to hold more than 1 instance of struct thread.
+4. Make changes to trap.c to make it thread aware.
+5. Update scheduling code to use two-tier scheduling
+
+Notes:
+
